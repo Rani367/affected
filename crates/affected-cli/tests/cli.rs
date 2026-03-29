@@ -143,17 +143,18 @@ fn test_cli_list_no_changes() {
 #[test]
 fn test_cli_list_with_changes() {
     let dir = tempfile::tempdir().unwrap();
-    setup_cargo_workspace(dir.path());
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    setup_cargo_workspace(&root);
 
     // Make a change
     std::fs::write(
-        dir.path().join("crates/core/src/lib.rs"),
+        root.join("crates/core/src/lib.rs"),
         "pub fn hello() { /* v2 */ }\n",
     )
     .unwrap();
     std::process::Command::new("git")
         .args(["add", "-A"])
-        .current_dir(dir.path())
+        .current_dir(&root)
         .output()
         .unwrap();
     std::process::Command::new("git")
@@ -166,13 +167,13 @@ fn test_cli_list_with_changes() {
             "-m",
             "change core",
         ])
-        .current_dir(dir.path())
+        .current_dir(&root)
         .output()
         .unwrap();
 
     affected_cmd()
         .args(["list", "--base", "HEAD~1", "--root"])
-        .arg(dir.path())
+        .arg(&root)
         .assert()
         .success()
         .stdout(predicate::str::contains("core"))
