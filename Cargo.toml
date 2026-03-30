@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rani367/affected"
@@ -15,7 +15,7 @@ rust-version = "1.85"
 authors = ["Rani367"]
 
 [workspace.dependencies]
-affected-core = { version = "0.1.0", path = "crates/affected-core" }
+affected-core = { version = "0.2.0", path = "crates/affected-core" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 #[command(
     name = "affected",
     version,
-    about = "Run only the tests that matter. Language-agnostic affected test detection for monorepos."
+    about = "Detect affected packages. Run only what matters. Language-agnostic monorepo tool."
 )]
 struct Cli {
     /// Path to the project root (default: current directory)
@@ -136,6 +136,48 @@ enum Commands {
         skip: Option<String>,
     },
 
+    /// Run a custom command for each affected package
+    Run {
+        /// Command template to execute (use {package} as placeholder)
+        command: String,
+
+        /// Base git ref to compare against (branch, tag, or commit)
+        #[arg(long, required_unless_present = "merge_base")]
+        base: Option<String>,
+
+        /// Use merge-base between HEAD and this branch (more accurate for PRs)
+        #[arg(long)]
+        merge_base: Option<String>,
+
+        /// Show what would be run without executing
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Only include packages matching this glob pattern
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Exclude packages matching this glob pattern
+        #[arg(long)]
+        skip: Option<String>,
+
+        /// Show why each package is affected
+        #[arg(long)]
+        explain: bool,
+
+        /// Number of parallel jobs (0 = auto, 1 = sequential)
+        #[arg(long, short = 'j', default_value = "1")]
+        jobs: usize,
+
+        /// Timeout per package in seconds
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -226,6 +268,33 @@ fn main() -> Result<()> {
         } => {
             let base_ref = resolve_base(&root, base, merge_base)?;
             cmd_ci(&root, &base_ref, filter.as_deref(), skip.as_deref())
+        }
+        Commands::Run {
+            command,
+            base,
+            merge_base,
+            dry_run,
+            json,
+            filter,
+            skip,
+            explain,
+            jobs,
+            timeout,
+        } => {
+            let base_ref = resolve_base(&root, base, merge_base)?;
+            cmd_run(
+                &root,
+                &base_ref,
+                &command,
+                dry_run,
+                json,
+                filter.as_deref(),
+                skip.as_deref(),
+                explain,
+                jobs,
+                timeout,
+                cli.quiet,
+            )
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
@@ -377,6 +446,97 @@ fn cmd_test(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cmd_run(
+    root: &std::path::Path,
+    base: &str,
+    command_template: &str,
+    dry_run: bool,
+    json: bool,
+    filter: Option<&str>,
+    skip: Option<&str>,
+    explain: bool,
+    jobs: usize,
+    timeout: Option<u64>,
+    quiet: bool,
+) -> Result<()> {
+    let result = affected_core::find_affected_with_options(root, base, explain, filter, skip)?;
+
+    if result.affected.is_empty() {
+        if !json && !quiet {
+            println!("{}", "No packages affected.".dimmed());
+        }
+        if json {
+            let empty = affected_core::types::TestOutputJson {
+                affected: vec![],
+                results: vec![],
+                summary: affected_core::types::TestSummaryJson {
+                    passed: 0,
+                    failed: 0,
+                    total: 0,
+                    duration_ms: 0,
+                },
+            };
+            println!("{}", serde_json::to_string_pretty(&empty)?);
+        }
+        return Ok(());
+    }
+
+    if !json && !quiet {
+        println!(
+            "{} command for {} affected package(s) (out of {} total, {} files changed):",
+            "Running".bold().cyan(),
+            result.affected.len(),
+            result.total_packages,
+            result.changed_files,
+        );
+        if explain {
+            print_explanations(&result);
+        }
+        println!();
+    }
+
+    let commands: Vec<_> = result
+        .affected
+        .iter()
+        .map(|name| {
+            let pkg_id = affected_core::types::PackageId(name.clone());
+            let cmd: Vec<String> = command_template
+                .replace("{package}", name)
+                .split_whitespace()
+                .map(String::from)
+                .collect();
+            (pkg_id, cmd)
+        })
+        .collect();
+
+    let timeout_dur = timeout.map(std::time::Duration::from_secs);
+    let runner = affected_core::runner::Runner::new(affected_core::runner::RunnerConfig {
+        root: root.to_path_buf(),
+        dry_run,
+        timeout: timeout_dur,
+        jobs,
+        json,
+        quiet,
+    });
+
+    let results = runner.run_tests(commands)?;
+
+    if json {
+        let json_output = affected_core::runner::results_to_json(&result.affected, &results);
+        println!("{}", serde_json::to_string_pretty(&json_output)?);
+    } else {
+        affected_core::runner::print_summary(&results);
+    }
+
+    let any_failed = results.iter().any(|r| !r.success);
+    if any_failed {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
 fn cmd_list(
     root: &std::path::Path,
     base: &str,
@@ -509,6 +669,10 @@ fn cmd_ci(
     let count = result.affected.len();
     let has_affected = !result.affected.is_empty();
 
+    // Build matrix JSON for GitHub Actions dynamic matrix strategy
+    let matrix = serde_json::json!({"package": &result.affected});
+    let matrix_str = serde_json::to_string(&matrix)?;
+
     // Output for GitHub Actions
     if let Ok(output_file) = std::env::var("GITHUB_OUTPUT") {
         let mut content = String::new();
@@ -519,6 +683,7 @@ fn cmd_ci(
             "affected_json={}\n",
             serde_json::to_string(&result.affected)?
         ));
+        content.push_str(&format!("matrix={}\n", matrix_str));
         std::fs::write(output_file, content)?;
     }
 
@@ -526,6 +691,7 @@ fn cmd_ci(
     println!("affected={}", affected_csv);
     println!("count={}", count);
     println!("has_affected={}", has_affected);
+    println!("matrix={}", matrix_str);
 
     Ok(())
 }

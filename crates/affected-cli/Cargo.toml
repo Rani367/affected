@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Run only the tests that matter. Language-agnostic affected test detection for monorepos."
+description = "Detect affected packages. Run only what matters. Language-agnostic monorepo tool."
 keywords = ["monorepo", "testing", "ci", "affected", "workspace"]
 categories = ["development-tools::testing", "command-line-utilities"]
 

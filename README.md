@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">affected</h1>
-  <p align="center">Run only the tests that matter.</p>
+  <p align="center">Detect affected packages. Run only what matters.</p>
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  A standalone, language-agnostic CLI that detects which packages in your monorepo are affected by git changes and runs only their tests. No framework, no config files, no lock-in.
+  A standalone, language-agnostic CLI that detects which packages in your monorepo are affected by git changes — then runs tests, lints, builds, or any command on only those packages. No framework, no config files, no lock-in.
 </p>
 
 ---
@@ -29,40 +29,47 @@ $ affected list --base main --explain
 ```
 
 ```
-$ affected test --base main --jobs 4 --dry-run
+$ affected run "cargo clippy -p {package}" --base main --jobs 4 --dry-run
 
-Testing 3 affected package(s) (out of 8 total, 2 files changed):
+Running command for 3 affected package(s) (out of 8 total, 2 files changed):
 
-  [dry-run] core: cargo test -p core
-  [dry-run] api: cargo test -p api
-  [dry-run] cli: cargo test -p cli
-
-  Results: 3 passed, 0 failed, 3 total (0.0s)
+  [dry-run] core: cargo clippy -p core
+  [dry-run] api: cargo clippy -p api
+  [dry-run] cli: cargo clippy -p cli
 ```
 
 ## Why
 
 Every monorepo team hacks together bash scripts with `git diff | grep` to avoid running all tests on every PR. Tools like Nx, Turborepo, and Bazel solve this but require buying into an entire build system.
 
-`affected` is a single binary you `cargo install` and run. It auto-detects your project type, builds a dependency graph, and figures out what to test. Zero config to start.
+`affected` is a single binary you install and run. It auto-detects your project type, builds a dependency graph, and figures out what's affected. Zero config to start.
 
 ## Features
 
 - **Zero config** -- auto-detects your project type and dependency graph
 - **7 ecosystems** -- Cargo, npm, pnpm, Yarn Berry, Go, Python (Poetry/uv), Maven, Gradle
-- **Transitive detection** -- if `core` changes and `api` depends on `core`, both are tested
+- **Transitive detection** -- if `core` changes and `api` depends on `core`, both are affected
+- **`affected run`** -- run *any command* on affected packages, not just tests
 - **`--explain`** -- shows *why* each package is affected with the full dependency chain
-- **Parallel tests** -- `--jobs 4` runs tests across multiple threads
-- **CI-first** -- `--json`, `--junit`, and `affected ci` for GitHub Actions integration
+- **Dynamic CI matrix** -- `affected ci` outputs a JSON matrix for parallel GitHub Actions jobs
+- **Parallel execution** -- `--jobs 4` runs commands across multiple threads
+- **CI-first** -- `--json`, `--junit`, GitHub Actions integration, PR comment bot
 - **Fast** -- written in Rust, uses libgit2 for native git operations
 
 ## Install
 
 ```bash
-cargo install affected-cli
-```
+# Homebrew (macOS/Linux)
+brew install Rani367/tap/affected
 
-Or download a pre-built binary from [Releases](https://github.com/Rani367/affected/releases).
+# Cargo
+cargo install affected-cli
+
+# GitHub Actions
+- uses: Rani367/setup-affected@v1
+
+# Or download a binary from Releases
+```
 
 ## Quick Start
 
@@ -70,16 +77,16 @@ Or download a pre-built binary from [Releases](https://github.com/Rani367/affect
 # What's affected?
 affected list --base main
 
-# Run only affected tests
-affected test --base main
-
 # See why each package is affected
 affected list --base main --explain
 
-# Dry run (show commands without executing)
-affected test --base main --dry-run
+# Run only affected tests
+affected test --base main
 
-# Parallel execution with 4 threads
+# Run any command on affected packages
+affected run "cargo clippy -p {package}" --base main
+
+# Parallel execution
 affected test --base main --jobs 4
 ```
 
@@ -103,9 +110,21 @@ affected test --base main --skip "e2e-*"      # skip matching packages
 affected test --base main --explain           # show why each is affected
 ```
 
+### `affected run`
+
+Run any command on affected packages. Use `{package}` as a placeholder.
+
+```bash
+affected run "cargo clippy -p {package}" --base main         # lint affected
+affected run "cargo build -p {package}" --base main --jobs 4  # build affected
+affected run "npm run lint --workspace={package}" --base main  # npm lint
+affected run "go vet ./{package}/..." --base main              # go vet
+affected run "echo {package}" --base main --dry-run            # preview
+```
+
 ### `affected list`
 
-List affected packages without running tests.
+List affected packages without running anything.
 
 ```bash
 affected list --base main                     # list affected packages
@@ -125,7 +144,7 @@ affected graph --dot | dot -Tpng -o graph.png # render as image
 
 ### `affected ci`
 
-Output variables for CI systems (GitHub Actions).
+Output variables for CI systems (GitHub Actions), including a JSON matrix for dynamic parallel jobs.
 
 ```bash
 affected ci --base main
@@ -133,30 +152,83 @@ affected ci --base main
 #   affected=core,api,cli
 #   count=3
 #   has_affected=true
+#   matrix={"package":["core","api","cli"]}
 ```
 
-#### GitHub Actions Example
+## GitHub Actions
+
+### Setup
+
+```yaml
+- uses: Rani367/setup-affected@v1
+- run: affected test --merge-base origin/main
+```
+
+### Dynamic Matrix (each package as a separate job)
+
+Each affected package runs as a **separate parallel job** in the GitHub Actions UI:
 
 ```yaml
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.affected.outputs.matrix }}
+      has_affected: ${{ steps.affected.outputs.has_affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Rani367/setup-affected@v1
+      - id: affected
+        run: affected ci --merge-base origin/main
+
   test:
+    needs: detect
+    if: needs.detect.outputs.has_affected == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test ${{ matrix.package }}
+        run: cargo test -p ${{ matrix.package }}
+```
+
+### PR Comment Bot
+
+Auto-comment on PRs showing which packages are affected and why:
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  comment:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed for git diff
-
-      - name: Install affected
-        run: cargo install affected-cli
-
-      - name: Detect affected packages
-        id: affected
-        run: affected ci --merge-base main
-
-      - name: Run affected tests
-        if: steps.affected.outputs.has_affected == 'true'
-        run: affected test --merge-base main --jobs 4 --junit results.xml
+          fetch-depth: 0
+      - uses: Rani367/affected-pr-comment@v1
 ```
+
+This posts a comment like:
+
+> **Affected Packages (3 of 8)**
+>
+> | Package | Reason |
+> |---------|--------|
+> | **core** | directly changed: `src/lib.rs` |
+> | **api** | depends on: core |
+> | **cli** | depends on: api -> core |
+
+The comment updates automatically on each push (no duplicates).
 
 ### `affected completions`
 
@@ -216,7 +288,7 @@ skip = true
 3. **Diff** -- computes changed files using libgit2 (base ref vs HEAD + working tree)
 4. **Map** -- maps each changed file to its owning package
 5. **Traverse** -- runs reverse BFS on the dependency graph to find all transitively affected packages
-6. **Execute** -- runs test commands for affected packages only
+6. **Execute** -- runs commands for affected packages only
 
 ## Comparison
 
@@ -226,7 +298,10 @@ skip = true
 | Standalone binary | Yes | No (Node.js) | No (Node.js) | No (JVM) |
 | Language agnostic | 7 ecosystems | JS/TS + plugins | JS/TS | Any (with rules) |
 | Setup time | 1 minute | Hours | Hours | Days-weeks |
+| `affected run <cmd>` | Yes | No | No | No |
 | `--explain` | Yes | No | No | No |
+| Dynamic CI matrix | Yes | Plugin | No | No |
+| PR comment bot | Yes | No | No | No |
 | Binary size | ~5MB | ~200MB+ | ~100MB+ | ~500MB+ |
 
 ## Global Flags

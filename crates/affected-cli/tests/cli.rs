@@ -278,6 +278,149 @@ fn test_cli_test_dry_run_no_changes() {
         .stdout(predicate::str::contains("No packages affected"));
 }
 
+// ─── ci ────────────────────────────────────────────────────
+
+#[test]
+fn test_cli_ci_matrix_output() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_cargo_workspace(dir.path());
+
+    // Make a change to core
+    std::fs::write(
+        dir.path().join("crates/core/src/lib.rs"),
+        "pub fn hello() { /* ci-test */ }\n",
+    )
+    .unwrap();
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@test.com",
+            "commit",
+            "-m",
+            "change core",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let output = affected_cmd()
+        .args(["ci", "--base", "HEAD~1", "--root"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Verify matrix line is present and valid JSON
+    let matrix_line = stdout
+        .lines()
+        .find(|l| l.starts_with("matrix="))
+        .expect("matrix= line missing");
+    let matrix_json: serde_json::Value =
+        serde_json::from_str(matrix_line.strip_prefix("matrix=").unwrap()).unwrap();
+    let packages = matrix_json["package"].as_array().unwrap();
+    assert!(!packages.is_empty());
+
+    // Verify has_affected and count are present
+    assert!(stdout.contains("has_affected=true"));
+    assert!(stdout.contains("count="));
+}
+
+#[test]
+fn test_cli_ci_no_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_cargo_workspace(dir.path());
+
+    let output = affected_cmd()
+        .args(["ci", "--base", "HEAD", "--root"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(stdout.contains("has_affected=false"));
+    assert!(stdout.contains("count=0"));
+    assert!(stdout.contains(r#"matrix={"package":[]}"#));
+}
+
+// ─── run ───────────────────────────────────────────────────
+
+#[test]
+fn test_cli_run_dry_run() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_cargo_workspace(dir.path());
+
+    // Make a change
+    std::fs::write(
+        dir.path().join("crates/core/src/lib.rs"),
+        "pub fn hello() { /* run-test */ }\n",
+    )
+    .unwrap();
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@test.com",
+            "commit",
+            "-m",
+            "change core",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    affected_cmd()
+        .args([
+            "run",
+            "echo testing {package}",
+            "--base",
+            "HEAD~1",
+            "--dry-run",
+            "--root",
+        ])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[dry-run]"))
+        .stdout(predicate::str::contains("echo testing core"));
+}
+
+#[test]
+fn test_cli_run_no_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_cargo_workspace(dir.path());
+
+    affected_cmd()
+        .args([
+            "run",
+            "echo {package}",
+            "--base",
+            "HEAD",
+            "--dry-run",
+            "--root",
+        ])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No packages affected"));
+}
+
 // ─── Error cases ────────────────────────────────────────────
 
 #[test]
@@ -312,5 +455,5 @@ fn test_cli_help() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Run only the tests that matter"));
+        .stdout(predicate::str::contains("Detect affected packages"));
 }
