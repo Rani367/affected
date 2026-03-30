@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
 use std::path::PathBuf;
@@ -112,12 +112,20 @@ enum Commands {
         /// Output in DOT format (for Graphviz)
         #[arg(long)]
         dot: bool,
+
+        /// Base git ref to highlight affected packages in the graph
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Use merge-base between HEAD and this branch
+        #[arg(long)]
+        merge_base: Option<String>,
     },
 
     /// Show detected project type and packages
     Detect,
 
-    /// Output affected packages for CI systems (GitHub Actions)
+    /// Output affected packages for CI systems
     Ci {
         /// Base git ref to compare against
         #[arg(long, required_unless_present = "merge_base")]
@@ -134,6 +142,28 @@ enum Commands {
         /// Exclude packages matching this glob pattern
         #[arg(long)]
         skip: Option<String>,
+
+        /// CI platform output format
+        #[arg(long, value_enum, default_value = "github")]
+        format: CiFormat,
+    },
+
+    /// Initialize a .affected.toml config file
+    Init {
+        /// Skip interactive prompts and use auto-detected defaults
+        #[arg(long)]
+        non_interactive: bool,
+    },
+
+    /// Watch for file changes and re-run a command
+    Watch {
+        /// Subcommand to re-run on changes (test, list, or run)
+        #[command(subcommand)]
+        subcommand: WatchableCommand,
+
+        /// Debounce interval in milliseconds
+        #[arg(long, default_value = "500", global = true)]
+        debounce: u64,
     },
 
     /// Run a custom command for each affected package
@@ -182,6 +212,84 @@ enum Commands {
     Completions {
         /// Shell to generate completions for
         shell: Shell,
+    },
+}
+
+/// CI platform output format
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CiFormat {
+    /// GitHub Actions ($GITHUB_OUTPUT)
+    Github,
+    /// GitLab CI (dotenv artifact)
+    Gitlab,
+    /// CircleCI ($BASH_ENV)
+    Circleci,
+    /// Azure Pipelines (##vso logging commands)
+    Azure,
+    /// Plain key=value to stdout
+    Generic,
+}
+
+/// Subcommands that can be re-run in watch mode
+#[derive(Subcommand)]
+enum WatchableCommand {
+    /// Watch and re-run tests for affected packages
+    Test {
+        #[arg(long, required_unless_present = "merge_base")]
+        base: Option<String>,
+        #[arg(long)]
+        merge_base: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long)]
+        skip: Option<String>,
+        #[arg(long)]
+        explain: bool,
+        #[arg(long, short = 'j', default_value = "1")]
+        jobs: usize,
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    /// Watch and re-list affected packages
+    List {
+        #[arg(long, required_unless_present = "merge_base")]
+        base: Option<String>,
+        #[arg(long)]
+        merge_base: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long)]
+        skip: Option<String>,
+        #[arg(long)]
+        explain: bool,
+    },
+    /// Watch and re-run a custom command
+    Run {
+        command: String,
+        #[arg(long, required_unless_present = "merge_base")]
+        base: Option<String>,
+        #[arg(long)]
+        merge_base: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long)]
+        skip: Option<String>,
+        #[arg(long)]
+        explain: bool,
+        #[arg(long, short = 'j', default_value = "1")]
+        jobs: usize,
+        #[arg(long)]
+        timeout: Option<u64>,
     },
 }
 
@@ -258,17 +366,41 @@ fn main() -> Result<()> {
                 cli.quiet,
             )
         }
-        Commands::Graph { dot } => cmd_graph(&root, dot),
+        Commands::Graph {
+            dot,
+            base,
+            merge_base,
+        } => {
+            let base_ref = match (&base, &merge_base) {
+                (Some(_), _) | (_, Some(_)) => {
+                    Some(resolve_base(&root, base, merge_base)?)
+                }
+                _ => None,
+            };
+            cmd_graph(&root, dot, base_ref.as_deref())
+        }
         Commands::Detect => cmd_detect(&root),
         Commands::Ci {
             base,
             merge_base,
             filter,
             skip,
+            format,
         } => {
             let base_ref = resolve_base(&root, base, merge_base)?;
-            cmd_ci(&root, &base_ref, filter.as_deref(), skip.as_deref())
+            cmd_ci(
+                &root,
+                &base_ref,
+                filter.as_deref(),
+                skip.as_deref(),
+                format,
+            )
         }
+        Commands::Init { non_interactive } => cmd_init(&root, non_interactive),
+        Commands::Watch {
+            subcommand,
+            debounce,
+        } => cmd_watch(&root, subcommand, debounce, cli.config.as_deref(), cli.quiet),
         Commands::Run {
             command,
             base,
@@ -580,7 +712,7 @@ fn cmd_list(
     Ok(())
 }
 
-fn cmd_graph(root: &std::path::Path, dot: bool) -> Result<()> {
+fn cmd_graph(root: &std::path::Path, dot: bool, base: Option<&str>) -> Result<()> {
     let (_resolver, project_graph) = affected_core::resolve_project(root)?;
     let dep_graph = affected_core::graph::DepGraph::from_project_graph(&project_graph);
 
@@ -604,18 +736,137 @@ fn cmd_graph(root: &std::path::Path, dot: bool) -> Result<()> {
         return Ok(());
     }
 
+    // Get affected packages if base is specified
+    let affected_set: std::collections::HashSet<String> = if let Some(base_ref) = base {
+        let result =
+            affected_core::find_affected_with_options(root, base_ref, false, None, None)?;
+        result.affected.into_iter().collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    // Build adjacency list: package -> list of packages it depends on
     let edges = dep_graph.edges();
-    if edges.is_empty() {
-        println!("{}", "No dependencies between packages.".dimmed());
+    let all_packages: Vec<String> = {
+        let mut names: Vec<_> = project_graph.packages.keys().map(|k| k.0.clone()).collect();
+        names.sort();
+        names
+    };
+
+    if all_packages.is_empty() {
+        println!("{}", "No packages found.".dimmed());
         return Ok(());
     }
 
-    println!("{}\n", "Dependency Graph:".bold());
+    // Build children map (reverse of depends-on: who depends on me)
+    let mut children: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut has_parent = std::collections::HashSet::new();
+
     for (from, to) in &edges {
-        println!("  {} {} {}", from.to_string().cyan(), "→".dimmed(), to);
+        children
+            .entry(from.to_string())
+            .or_default()
+            .push(to.to_string());
+        has_parent.insert(to.to_string());
+    }
+
+    // Sort children for consistent output
+    for v in children.values_mut() {
+        v.sort();
+    }
+
+    // Root nodes: packages that nothing depends on (no incoming edges)
+    // Actually for a dependency tree, roots are packages that DEPEND on others but nobody depends on them
+    // i.e., top-level apps/CLIs. Let's show packages that have no incoming edges.
+    let mut roots: Vec<&String> = all_packages
+        .iter()
+        .filter(|p| !has_parent.contains(*p))
+        .collect();
+    roots.sort();
+
+    let total = all_packages.len();
+    if !affected_set.is_empty() {
+        println!(
+            "{} ({} packages, {} affected):\n",
+            "Dependency Graph".bold(),
+            total,
+            affected_set.len(),
+        );
+    } else {
+        println!("{} ({} packages):\n", "Dependency Graph".bold(), total);
+    }
+
+    for (i, root_pkg) in roots.iter().enumerate() {
+        let is_last_root = i == roots.len() - 1;
+        render_tree_node(root_pkg, "", is_last_root, &children, &affected_set, &mut std::collections::HashSet::new());
+    }
+
+    // Show isolated packages (no edges at all)
+    let isolated: Vec<&String> = all_packages
+        .iter()
+        .filter(|p| !has_parent.contains(*p) && !children.contains_key(*p))
+        .filter(|p| !roots.contains(p))
+        .collect();
+
+    if !isolated.is_empty() {
+        println!();
+        for name in &isolated {
+            let marker = if affected_set.contains(*name) {
+                format!("  {}", "●".yellow())
+            } else {
+                String::new()
+            };
+            println!("  {}{} {}", name.cyan(), marker, "(no dependencies)".dimmed());
+        }
     }
 
     Ok(())
+}
+
+fn render_tree_node(
+    name: &str,
+    prefix: &str,
+    is_last: bool,
+    children: &std::collections::HashMap<String, Vec<String>>,
+    affected: &std::collections::HashSet<String>,
+    visited: &mut std::collections::HashSet<String>,
+) {
+    let connector = if prefix.is_empty() {
+        "  "
+    } else if is_last {
+        "  └── "
+    } else {
+        "  ├── "
+    };
+
+    let marker = if affected.contains(name) {
+        format!("  {}", "●".yellow())
+    } else {
+        String::new()
+    };
+
+    println!("{}{}{}{}", prefix, connector, name.cyan(), marker);
+
+    if visited.contains(name) {
+        return; // prevent infinite loops on cycles
+    }
+    visited.insert(name.to_string());
+
+    let child_prefix = if prefix.is_empty() {
+        String::new()
+    } else if is_last {
+        format!("{}      ", prefix)
+    } else {
+        format!("{}  │   ", prefix)
+    };
+
+    if let Some(deps) = children.get(name) {
+        for (j, dep) in deps.iter().enumerate() {
+            let is_last_child = j == deps.len() - 1;
+            render_tree_node(dep, &child_prefix, is_last_child, children, affected, visited);
+        }
+    }
 }
 
 fn cmd_detect(root: &std::path::Path) -> Result<()> {
@@ -662,38 +913,346 @@ fn cmd_ci(
     base: &str,
     filter: Option<&str>,
     skip: Option<&str>,
+    format: CiFormat,
 ) -> Result<()> {
     let result = affected_core::find_affected_with_options(root, base, false, filter, skip)?;
 
     let affected_csv = result.affected.join(",");
     let count = result.affected.len();
     let has_affected = !result.affected.is_empty();
-
-    // Build matrix JSON for GitHub Actions dynamic matrix strategy
+    let affected_json = serde_json::to_string(&result.affected)?;
     let matrix = serde_json::json!({"package": &result.affected});
     let matrix_str = serde_json::to_string(&matrix)?;
 
-    // Output for GitHub Actions
-    if let Ok(output_file) = std::env::var("GITHUB_OUTPUT") {
-        let mut content = String::new();
-        content.push_str(&format!("affected={}\n", affected_csv));
-        content.push_str(&format!("count={}\n", count));
-        content.push_str(&format!("has_affected={}\n", has_affected));
-        content.push_str(&format!(
-            "affected_json={}\n",
-            serde_json::to_string(&result.affected)?
-        ));
-        content.push_str(&format!("matrix={}\n", matrix_str));
-        std::fs::write(output_file, content)?;
+    match format {
+        CiFormat::Github => {
+            if let Ok(output_file) = std::env::var("GITHUB_OUTPUT") {
+                let mut content = String::new();
+                content.push_str(&format!("affected={}\n", affected_csv));
+                content.push_str(&format!("count={}\n", count));
+                content.push_str(&format!("has_affected={}\n", has_affected));
+                content.push_str(&format!("affected_json={}\n", affected_json));
+                content.push_str(&format!("matrix={}\n", matrix_str));
+                std::fs::write(output_file, content)?;
+            }
+            println!("affected={}", affected_csv);
+            println!("count={}", count);
+            println!("has_affected={}", has_affected);
+            println!("matrix={}", matrix_str);
+        }
+        CiFormat::Gitlab => {
+            // Write dotenv file for GitLab CI artifacts
+            let dotenv = format!(
+                "AFFECTED={}\nAFFECTED_COUNT={}\nHAS_AFFECTED={}\nAFFECTED_JSON={}\nAFFECTED_MATRIX={}\n",
+                affected_csv, count, has_affected, affected_json, matrix_str
+            );
+            std::fs::write("ci.env", &dotenv)?;
+            // Also print for stdout capture
+            print!("{}", dotenv);
+        }
+        CiFormat::Circleci => {
+            if let Ok(bash_env) = std::env::var("BASH_ENV") {
+                let content = format!(
+                    "export AFFECTED=\"{}\"\nexport AFFECTED_COUNT=\"{}\"\nexport HAS_AFFECTED=\"{}\"\nexport AFFECTED_JSON='{}'\nexport AFFECTED_MATRIX='{}'\n",
+                    affected_csv, count, has_affected, affected_json, matrix_str
+                );
+                // Append to BASH_ENV
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(bash_env)?;
+                file.write_all(content.as_bytes())?;
+            }
+            println!("affected={}", affected_csv);
+            println!("count={}", count);
+            println!("has_affected={}", has_affected);
+            println!("matrix={}", matrix_str);
+        }
+        CiFormat::Azure => {
+            println!(
+                "##vso[task.setvariable variable=affected;isOutput=true]{}",
+                affected_csv
+            );
+            println!(
+                "##vso[task.setvariable variable=affected_count;isOutput=true]{}",
+                count
+            );
+            println!(
+                "##vso[task.setvariable variable=has_affected;isOutput=true]{}",
+                has_affected
+            );
+            println!(
+                "##vso[task.setvariable variable=affected_json;isOutput=true]{}",
+                affected_json
+            );
+            println!(
+                "##vso[task.setvariable variable=matrix;isOutput=true]{}",
+                matrix_str
+            );
+        }
+        CiFormat::Generic => {
+            println!("affected={}", affected_csv);
+            println!("count={}", count);
+            println!("has_affected={}", has_affected);
+            println!("affected_json={}", affected_json);
+            println!("matrix={}", matrix_str);
+        }
     }
 
-    // Also print to stdout for other CI systems
-    println!("affected={}", affected_csv);
-    println!("count={}", count);
-    println!("has_affected={}", has_affected);
-    println!("matrix={}", matrix_str);
+    Ok(())
+}
+
+fn cmd_init(root: &std::path::Path, non_interactive: bool) -> Result<()> {
+    let config_path = root.join(".affected.toml");
+
+    if config_path.exists() && !non_interactive {
+        let overwrite = dialoguer::Confirm::new()
+            .with_prompt(".affected.toml already exists. Overwrite?")
+            .default(false)
+            .interact()?;
+        if !overwrite {
+            println!("{}", "Aborted.".dimmed());
+            return Ok(());
+        }
+    }
+
+    // Auto-detect ecosystems
+    let detected = affected_core::detect::detect_ecosystems(root).unwrap_or_default();
+    let ecosystem_name = detected.first().map(|e| e.to_string());
+
+    if !non_interactive {
+        if let Some(ref eco) = ecosystem_name {
+            println!(
+                "  {} Detected ecosystem: {}",
+                "✓".green(),
+                eco.cyan()
+            );
+        } else {
+            println!(
+                "  {} No ecosystem auto-detected. Config will use defaults.",
+                "!".yellow()
+            );
+        }
+    }
+
+    let mut test_section = String::new();
+    let mut ignore_patterns: Vec<String> =
+        vec!["*.md".into(), "docs/**".into(), ".github/**".into()];
+
+    if !non_interactive {
+        // Ask for custom test command
+        let custom_test: String = dialoguer::Input::new()
+            .with_prompt("Custom test command (leave blank for default)")
+            .allow_empty(true)
+            .interact_text()?;
+
+        if !custom_test.is_empty() {
+            if let Some(ref eco) = ecosystem_name {
+                test_section = format!("{} = \"{}\"", eco, custom_test);
+            }
+        }
+
+        // Ask for ignore patterns
+        let custom_ignore: String = dialoguer::Input::new()
+            .with_prompt("Ignore patterns (comma-separated, leave blank for defaults)")
+            .allow_empty(true)
+            .interact_text()?;
+
+        if !custom_ignore.is_empty() {
+            ignore_patterns = custom_ignore
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect();
+        }
+    }
+
+    // Generate config
+    let ignore_str = ignore_patterns
+        .iter()
+        .map(|p| format!("\"{}\"", p))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut config_content = String::from(
+        "# .affected.toml — configuration for the `affected` CLI\n\n",
+    );
+
+    config_content.push_str(&format!("ignore = [{}]\n\n", ignore_str));
+    config_content.push_str("[test]\n");
+    if test_section.is_empty() {
+        config_content.push_str("# Uncomment and customize test commands per ecosystem:\n");
+        config_content.push_str("# cargo = \"cargo nextest run -p {package}\"\n");
+        config_content.push_str("# npm = \"pnpm run test --filter {package}\"\n");
+        config_content.push_str("# go = \"go test ./{package}/...\"\n");
+        config_content.push_str("# python = \"python -m pytest {package}\"\n");
+        config_content.push_str("# bun = \"bun test --filter {package}\"\n");
+        config_content.push_str("# dotnet = \"dotnet test {package}\"\n");
+        config_content.push_str("# dart = \"dart test -C {package}\"\n");
+        config_content.push_str("# swift = \"swift test --filter {package}\"\n");
+        config_content.push_str("# elixir = \"mix cmd --app {package} mix test\"\n");
+        config_content.push_str("# sbt = \"sbt {package}/test\"\n");
+    } else {
+        config_content.push_str(&format!("{}\n", test_section));
+    }
+
+    std::fs::write(&config_path, config_content)?;
+    println!(
+        "\n  {} Created {}",
+        "✓".green().bold(),
+        config_path.display().to_string().cyan(),
+    );
 
     Ok(())
+}
+
+fn cmd_watch(
+    root: &std::path::Path,
+    subcommand: WatchableCommand,
+    debounce_ms: u64,
+    config_path: Option<&std::path::Path>,
+    quiet: bool,
+) -> Result<()> {
+    use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+    let debounce_dur = Duration::from_millis(debounce_ms);
+    let mut debouncer = new_debouncer(debounce_dur, tx)?;
+
+    // Watch the project root recursively
+    debouncer.watcher().watch(
+        root,
+        notify::RecursiveMode::Recursive,
+    )?;
+
+    // Directories to ignore
+    let ignore_dirs: Vec<&str> = vec![".git", "target", "node_modules", "_build", ".dart_tool"];
+
+    println!(
+        "{} Watching for changes... (Ctrl+C to stop)\n",
+        "👀".to_string().bold()
+    );
+
+    // Run once immediately
+    let _ = run_watchable(&subcommand, root, config_path, quiet);
+
+    loop {
+        match rx.recv() {
+            Ok(Ok(events)) => {
+                // Filter out events in ignored directories
+                let relevant = events.iter().any(|event| {
+                    if event.kind != DebouncedEventKind::Any {
+                        return false;
+                    }
+                    let path_str = event.path.to_string_lossy();
+                    !ignore_dirs.iter().any(|d| path_str.contains(&format!("/{}/", d)))
+                });
+
+                if relevant {
+                    println!(
+                        "\n{} Change detected, re-running...\n",
+                        "↻".cyan().bold()
+                    );
+                    let _ = run_watchable(&subcommand, root, config_path, quiet);
+                    println!(
+                        "\n{} Watching for changes...",
+                        "👀".to_string().dimmed()
+                    );
+                }
+            }
+            Ok(Err(error)) => {
+                eprintln!("Watch error: {}", error);
+            }
+            Err(_) => break,
+        }
+    }
+
+    Ok(())
+}
+
+fn run_watchable(
+    subcommand: &WatchableCommand,
+    root: &std::path::Path,
+    config_path: Option<&std::path::Path>,
+    quiet: bool,
+) -> Result<()> {
+    match subcommand {
+        WatchableCommand::Test {
+            base,
+            merge_base,
+            dry_run,
+            json,
+            filter,
+            skip,
+            explain,
+            jobs,
+            timeout,
+        } => {
+            let base_ref = resolve_base(root, base.clone(), merge_base.clone())?;
+            cmd_test(
+                root,
+                &base_ref,
+                *dry_run,
+                *json,
+                filter.as_deref(),
+                skip.as_deref(),
+                *explain,
+                *jobs,
+                *timeout,
+                None,
+                config_path,
+                quiet,
+            )
+        }
+        WatchableCommand::List {
+            base,
+            merge_base,
+            json,
+            filter,
+            skip,
+            explain,
+        } => {
+            let base_ref = resolve_base(root, base.clone(), merge_base.clone())?;
+            cmd_list(
+                root,
+                &base_ref,
+                *json,
+                filter.as_deref(),
+                skip.as_deref(),
+                *explain,
+                quiet,
+            )
+        }
+        WatchableCommand::Run {
+            command,
+            base,
+            merge_base,
+            dry_run,
+            json,
+            filter,
+            skip,
+            explain,
+            jobs,
+            timeout,
+        } => {
+            let base_ref = resolve_base(root, base.clone(), merge_base.clone())?;
+            cmd_run(
+                root,
+                &base_ref,
+                command,
+                *dry_run,
+                *json,
+                filter.as_deref(),
+                skip.as_deref(),
+                *explain,
+                *jobs,
+                *timeout,
+                quiet,
+            )
+        }
+    }
 }
 
 fn print_explanations(result: &affected_core::types::AffectedResult) {

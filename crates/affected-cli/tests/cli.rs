@@ -122,7 +122,7 @@ fn test_cli_graph() {
         .arg(dir.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("→"));
+        .stdout(predicate::str::contains("Dependency Graph"));
 }
 
 #[test]

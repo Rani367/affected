@@ -19,16 +19,33 @@ pub fn detect_ecosystems(root: &Path) -> Result<Vec<Ecosystem>> {
         }
     }
 
-    // Yarn: .yarnrc.yml exists → Ecosystem::Yarn (takes priority over npm)
+    // Yarn: .yarnrc.yml exists → Ecosystem::Yarn (takes priority over Bun/npm)
     let yarnrc = root.join(".yarnrc.yml");
     if yarnrc.exists() {
         debug!("Detected Yarn Berry project via .yarnrc.yml");
         detected.push(Ecosystem::Yarn);
     } else {
-        // npm/pnpm: package.json with "workspaces" or pnpm-workspace.yaml
+        // Bun: bun.lock/bun.lockb/bunfig.toml (takes priority over npm)
+        let has_bun = root.join("bun.lock").exists()
+            || root.join("bun.lockb").exists()
+            || root.join("bunfig.toml").exists();
         let pkg_json = root.join("package.json");
         let pnpm_ws = root.join("pnpm-workspace.yaml");
-        if pnpm_ws.exists() {
+
+        let has_workspaces = if pnpm_ws.exists() {
+            true
+        } else if pkg_json.exists() {
+            std::fs::read_to_string(&pkg_json)
+                .map(|c| c.contains("\"workspaces\""))
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        if has_bun && has_workspaces {
+            debug!("Detected Bun workspace via bun.lock/bunfig.toml");
+            detected.push(Ecosystem::Bun);
+        } else if pnpm_ws.exists() {
             debug!("Detected pnpm workspace via pnpm-workspace.yaml");
             detected.push(Ecosystem::Npm);
         } else if pkg_json.exists() {
@@ -96,11 +113,75 @@ pub fn detect_ecosystems(root: &Path) -> Result<Vec<Ecosystem>> {
         detected.push(Ecosystem::Gradle);
     }
 
+    // .NET: *.sln file at root
+    let sln_pattern = root.join("*.sln");
+    if let Ok(mut paths) = glob::glob(sln_pattern.to_str().unwrap_or("")) {
+        if paths.any(|p| p.is_ok()) {
+            debug!("Detected .NET solution via *.sln");
+            detected.push(Ecosystem::Dotnet);
+        }
+    }
+
+    // Swift: Package.swift with multiple targets or multiple Package.swift in subdirs
+    let package_swift = root.join("Package.swift");
+    if package_swift.exists() {
+        if let Ok(content) = std::fs::read_to_string(&package_swift) {
+            let target_count = content.matches(".target(").count()
+                + content.matches(".executableTarget(").count()
+                + content.matches(".testTarget(").count();
+            if target_count >= 2 {
+                debug!("Detected Swift package with {} targets", target_count);
+                detected.push(Ecosystem::Swift);
+            }
+        }
+    }
+
+    // Dart/Flutter: pubspec.yaml with workspace, melos.yaml, or multiple pubspec.yaml
+    let root_pubspec = root.join("pubspec.yaml");
+    if root_pubspec.exists() {
+        if let Ok(content) = std::fs::read_to_string(&root_pubspec) {
+            if content.contains("workspace:") {
+                debug!("Detected Dart workspace via pubspec.yaml workspace field");
+                detected.push(Ecosystem::Dart);
+            }
+        }
+    }
+    if !detected.contains(&Ecosystem::Dart) && root.join("melos.yaml").exists() {
+        debug!("Detected Dart/Flutter monorepo via melos.yaml");
+        detected.push(Ecosystem::Dart);
+    }
+    if !detected.contains(&Ecosystem::Dart) {
+        let pattern = root.join("*/pubspec.yaml");
+        if let Ok(paths) = glob::glob(pattern.to_str().unwrap_or("")) {
+            let count = paths.filter_map(|p| p.ok()).count();
+            if count >= 2 {
+                debug!(
+                    "Detected Dart monorepo ({} pubspec.yaml files found)",
+                    count
+                );
+                detected.push(Ecosystem::Dart);
+            }
+        }
+    }
+
+    // Elixir: mix.exs + apps/ directory (umbrella project)
+    if root.join("mix.exs").exists() && root.join("apps").is_dir() {
+        debug!("Detected Elixir umbrella project via mix.exs + apps/");
+        detected.push(Ecosystem::Elixir);
+    }
+
+    // Scala/sbt: build.sbt at root
+    if root.join("build.sbt").exists() {
+        debug!("Detected sbt project via build.sbt");
+        detected.push(Ecosystem::Sbt);
+    }
+
     if detected.is_empty() {
         anyhow::bail!(
             "No supported project type found at {}.\n\
              Looked for: Cargo.toml (workspace), package.json (workspaces), \
-             go.work/go.mod, pyproject.toml, pom.xml (modules), settings.gradle(.kts)",
+             go.work/go.mod, pyproject.toml, pom.xml (modules), settings.gradle(.kts), \
+             *.sln (.NET), Package.swift, pubspec.yaml/melos.yaml, mix.exs (umbrella), build.sbt",
             root.display()
         );
     }
@@ -297,5 +378,110 @@ mod tests {
 
         let ecosystems = detect_ecosystems(dir.path()).unwrap();
         assert_eq!(ecosystems, vec![Ecosystem::Python]);
+    }
+
+    #[test]
+    fn test_detect_bun_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bun.lock"), "").unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Bun));
+    }
+
+    #[test]
+    fn test_detect_bun_lockb() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bun.lockb"), "").unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name": "root", "workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Bun));
+    }
+
+    #[test]
+    fn test_detect_dotnet_solution() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("MySolution.sln"), "Microsoft Visual Studio Solution File").unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Dotnet));
+    }
+
+    #[test]
+    fn test_detect_swift_package() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Package.swift"),
+            r#"let package = Package(
+    name: "MyPkg",
+    targets: [
+        .target(name: "Core", dependencies: []),
+        .target(name: "API", dependencies: ["Core"]),
+    ]
+)"#,
+        )
+        .unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Swift));
+    }
+
+    #[test]
+    fn test_detect_dart_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("pubspec.yaml"),
+            "name: root\nworkspace:\n  - packages/core\n  - packages/api\n",
+        )
+        .unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Dart));
+    }
+
+    #[test]
+    fn test_detect_melos() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("melos.yaml"),
+            "name: my_project\npackages:\n  - packages/*\n",
+        )
+        .unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Dart));
+    }
+
+    #[test]
+    fn test_detect_elixir_umbrella() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mix.exs"), "defmodule Root.MixProject do\nend").unwrap();
+        std::fs::create_dir_all(dir.path().join("apps")).unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Elixir));
+    }
+
+    #[test]
+    fn test_detect_sbt_project() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("build.sbt"),
+            "lazy val root = (project in file(\".\"))",
+        )
+        .unwrap();
+
+        let ecosystems = detect_ecosystems(dir.path()).unwrap();
+        assert!(ecosystems.contains(&Ecosystem::Sbt));
     }
 }

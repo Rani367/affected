@@ -47,13 +47,16 @@ Every monorepo team hacks together bash scripts with `git diff | grep` to avoid 
 ## Features
 
 - **Zero config** -- auto-detects your project type and dependency graph
-- **7 ecosystems** -- Cargo, npm, pnpm, Yarn Berry, Go, Python (Poetry/uv), Maven, Gradle
+- **13 ecosystems** -- Cargo, npm, pnpm, Yarn, Bun, Go, Python, Maven, Gradle, .NET, Swift, Dart/Flutter, Elixir, Scala/sbt
 - **Transitive detection** -- if `core` changes and `api` depends on `core`, both are affected
 - **`affected run`** -- run *any command* on affected packages, not just tests
 - **`--explain`** -- shows *why* each package is affected with the full dependency chain
-- **Dynamic CI matrix** -- `affected ci` outputs a JSON matrix for parallel GitHub Actions jobs
+- **Multi-CI** -- `affected ci --format github|gitlab|circleci|azure` with dynamic job matrices
+- **Watch mode** -- `affected watch test --base main` re-runs on file changes
+- **`affected init`** -- interactive setup wizard generates `.affected.toml`
+- **Dependency tree** -- `affected graph` renders a Unicode tree with affected highlighting
 - **Parallel execution** -- `--jobs 4` runs commands across multiple threads
-- **CI-first** -- `--json`, `--junit`, GitHub Actions integration, PR comment bot
+- **CI-first** -- `--json`, `--junit`, PR comment bot, shell completions
 - **Fast** -- written in Rust, uses libgit2 for native git operations
 
 ## Install
@@ -143,25 +146,57 @@ affected list --base main --explain           # show dependency chains
 
 ### `affected graph`
 
-Display the project dependency graph.
+Display the project dependency graph as a Unicode tree.
 
 ```bash
-affected graph                                # human-readable graph
+affected graph                                # Unicode dependency tree
+affected graph --base main                    # highlight affected packages
 affected graph --dot                          # DOT format for Graphviz
 affected graph --dot | dot -Tpng -o graph.png # render as image
 ```
 
+Example output:
+
+```
+Dependency Graph (5 packages, 3 affected):
+
+  cli  ●
+  └── api  ●
+      └── core  ●
+  utils
+  standalone  (no dependencies)
+```
+
 ### `affected ci`
 
-Output variables for CI systems (GitHub Actions), including a JSON matrix for dynamic parallel jobs.
+Output variables for CI systems with multi-platform support.
 
 ```bash
-affected ci --base main
-# Output:
-#   affected=core,api,cli
-#   count=3
-#   has_affected=true
-#   matrix={"package":["core","api","cli"]}
+affected ci --base main                        # GitHub Actions (default)
+affected ci --base main --format gitlab        # GitLab CI (writes ci.env)
+affected ci --base main --format azure         # Azure Pipelines (##vso)
+affected ci --base main --format circleci      # CircleCI ($BASH_ENV)
+affected ci --base main --format generic       # plain key=value
+```
+
+### `affected init`
+
+Interactive setup wizard to generate `.affected.toml`.
+
+```bash
+affected init                                  # interactive prompts
+affected init --non-interactive                # auto-detect and use defaults
+```
+
+### `affected watch`
+
+Watch for file changes and re-run commands automatically.
+
+```bash
+affected watch test --base main                # re-run tests on changes
+affected watch list --base main                # re-list affected on changes
+affected watch run "cargo clippy -p {package}" --base main  # re-run command
+affected watch test --base main --debounce 1000 # 1s debounce
 ```
 
 ## GitHub Actions
@@ -257,12 +292,18 @@ affected completions fish > ~/.config/fish/completions/affected.fish
 | **npm** | `package.json` with `workspaces` | `package.json` dependencies |
 | **pnpm** | `pnpm-workspace.yaml` | `package.json` dependencies |
 | **Yarn Berry** | `.yarnrc.yml` | `package.json` dependencies |
+| **Bun** | `bun.lock` / `bunfig.toml` | `package.json` dependencies |
 | **Go** | `go.work` / `go.mod` | `go mod graph` |
 | **Python** | `pyproject.toml` | PEP 621 deps + import scanning |
 | **Poetry** | `[tool.poetry]` in pyproject.toml | Poetry path dependencies |
 | **uv** | `[tool.uv.workspace]` in pyproject.toml | Workspace member globs |
 | **Maven** | `pom.xml` with `<modules>` | POM dependency declarations |
 | **Gradle** | `settings.gradle(.kts)` | `project(':...')` references |
+| **.NET/C#** | `*.sln` solution file | `<ProjectReference>` in .csproj |
+| **Swift/SPM** | `Package.swift` (multi-target) | Target dependency declarations |
+| **Dart/Flutter** | `pubspec.yaml` workspace / `melos.yaml` | `dependencies` in pubspec.yaml |
+| **Elixir** | `mix.exs` + `apps/` (umbrella) | `in_umbrella: true` deps |
+| **Scala/sbt** | `build.sbt` | `.dependsOn()` project refs |
 
 ## Configuration
 
@@ -280,6 +321,12 @@ go = "go test -v ./{package}/..."
 python = "uv run --package {package} pytest"
 maven = "mvn test -pl {package}"
 gradle = "gradle :{package}:test"
+bun = "bun test --filter {package}"
+dotnet = "dotnet test {package}"
+dart = "dart test -C {package}"
+swift = "swift test --filter {package}"
+elixir = "mix cmd --app {package} mix test"
+sbt = "sbt {package}/test"
 
 # Per-package overrides
 [packages.slow-e2e]
@@ -305,12 +352,15 @@ skip = true
 |---------|-----------|-----|-----------|-------|
 | Zero config | Yes | No | No | No |
 | Standalone binary | Yes | No (Node.js) | No (Node.js) | No (JVM) |
-| Language agnostic | 7 ecosystems | JS/TS + plugins | JS/TS | Any (with rules) |
+| Language agnostic | 13 ecosystems | JS/TS + plugins | JS/TS | Any (with rules) |
 | Setup time | 1 minute | Hours | Hours | Days-weeks |
 | `affected run <cmd>` | Yes | No | No | No |
 | `--explain` | Yes | No | No | No |
+| Watch mode | Yes | Yes | No | No |
+| Multi-CI support | 5 platforms | GitHub only | GitHub only | Custom |
 | Dynamic CI matrix | Yes | Plugin | No | No |
 | PR comment bot | Yes | No | No | No |
+| Interactive setup | `affected init` | `nx init` | `turbo init` | Manual |
 | Binary size | ~5MB | ~200MB+ | ~100MB+ | ~500MB+ |
 
 ## Global Flags

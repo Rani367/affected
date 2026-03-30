@@ -21,6 +21,12 @@ pub struct TestConfig {
     pub python: Option<String>,
     pub maven: Option<String>,
     pub gradle: Option<String>,
+    pub bun: Option<String>,
+    pub dotnet: Option<String>,
+    pub dart: Option<String>,
+    pub swift: Option<String>,
+    pub elixir: Option<String>,
+    pub sbt: Option<String>,
 }
 
 impl Config {
@@ -68,6 +74,12 @@ impl Config {
                 Ecosystem::Yarn => tc.npm.as_deref(), // Yarn uses npm config
                 Ecosystem::Maven => tc.maven.as_deref(),
                 Ecosystem::Gradle => tc.gradle.as_deref(),
+                Ecosystem::Bun => tc.bun.as_deref(),
+                Ecosystem::Dotnet => tc.dotnet.as_deref(),
+                Ecosystem::Dart => tc.dart.as_deref(),
+                Ecosystem::Swift => tc.swift.as_deref(),
+                Ecosystem::Elixir => tc.elixir.as_deref(),
+                Ecosystem::Sbt => tc.sbt.as_deref(),
             },
             None => None,
         }?;
@@ -137,11 +149,7 @@ npm = "pnpm test --filter {package}"
         let config = Config {
             test: Some(TestConfig {
                 cargo: Some("cargo nextest run -p {package}".into()),
-                npm: None,
-                go: None,
-                python: None,
-                maven: None,
-                gradle: None,
+                ..TestConfig::default()
             }),
             ignore: None,
             packages: None,
@@ -158,11 +166,7 @@ npm = "pnpm test --filter {package}"
         let config = Config {
             test: Some(TestConfig {
                 cargo: Some("cargo test -p {package}".into()),
-                npm: None,
-                go: None,
-                python: None,
-                maven: None,
-                gradle: None,
+                ..TestConfig::default()
             }),
             ignore: None,
             packages: None,

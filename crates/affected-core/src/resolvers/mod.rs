@@ -3,12 +3,18 @@ use std::path::Path;
 
 use crate::types::{Ecosystem, PackageId, ProjectGraph};
 
+pub mod bun;
 pub mod cargo;
+pub mod dart;
+pub mod dotnet;
+pub mod elixir;
 pub mod go;
 pub mod gradle;
 pub mod maven;
 pub mod npm;
 pub mod python;
+pub mod sbt;
+pub mod swift;
 pub mod yarn;
 
 /// Trait implemented by each ecosystem resolver.
@@ -33,12 +39,18 @@ pub trait Resolver {
 pub fn all_resolvers() -> Vec<Box<dyn Resolver>> {
     vec![
         Box::new(cargo::CargoResolver),
-        Box::new(yarn::YarnResolver), // Yarn before Npm: .yarnrc.yml takes priority
+        Box::new(yarn::YarnResolver), // Yarn before Bun/Npm: .yarnrc.yml takes priority
+        Box::new(bun::BunResolver),   // Bun before Npm: bun.lock takes priority
         Box::new(npm::NpmResolver),
         Box::new(go::GoResolver),
         Box::new(python::PythonResolver),
         Box::new(maven::MavenResolver),
         Box::new(gradle::GradleResolver),
+        Box::new(dotnet::DotnetResolver),
+        Box::new(swift::SwiftResolver),
+        Box::new(dart::DartResolver),
+        Box::new(elixir::ElixirResolver),
+        Box::new(sbt::SbtResolver),
     ]
 }
 
@@ -153,6 +165,6 @@ mod tests {
 
     #[test]
     fn test_all_resolvers_count() {
-        assert_eq!(all_resolvers().len(), 7);
+        assert_eq!(all_resolvers().len(), 13);
     }
 }

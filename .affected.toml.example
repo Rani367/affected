@@ -9,6 +9,12 @@
 # npm = "pnpm run test --filter {package}"
 # go = "go test ./{package}/..."
 # python = "python -m pytest {package}"
+# bun = "bun test --filter {package}"
+# dotnet = "dotnet test {package}"
+# dart = "dart test -C {package}"
+# swift = "swift test --filter {package}"
+# elixir = "mix cmd --app {package} mix test"
+# sbt = "sbt {package}/test"
 
 # File patterns to ignore when computing affected packages.
 # Changes to these files will never trigger tests.

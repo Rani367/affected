@@ -44,6 +44,12 @@ pub enum Ecosystem {
     Yarn,
     Maven,
     Gradle,
+    Bun,
+    Dotnet,
+    Dart,
+    Swift,
+    Elixir,
+    Sbt,
 }
 
 impl fmt::Display for Ecosystem {
@@ -56,6 +62,12 @@ impl fmt::Display for Ecosystem {
             Ecosystem::Yarn => write!(f, "yarn"),
             Ecosystem::Maven => write!(f, "maven"),
             Ecosystem::Gradle => write!(f, "gradle"),
+            Ecosystem::Bun => write!(f, "bun"),
+            Ecosystem::Dotnet => write!(f, "dotnet"),
+            Ecosystem::Dart => write!(f, "dart"),
+            Ecosystem::Swift => write!(f, "swift"),
+            Ecosystem::Elixir => write!(f, "elixir"),
+            Ecosystem::Sbt => write!(f, "sbt"),
         }
     }
 }
