@@ -9,9 +9,23 @@ pub struct GitDiff {
     pub repo_root: PathBuf,
 }
 
+/// Strip the `\\?\` extended-length path prefix on Windows.
+/// libgit2 mishandles these paths, causing discovery and diff failures.
+fn normalize_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
 /// Compute changed files between a base ref and HEAD (plus uncommitted changes).
 pub fn changed_files(repo_path: &Path, base_ref: &str) -> Result<GitDiff> {
-    let repo = Repository::discover(repo_path).context("Not a git repository")?;
+    let normalized = normalize_path(repo_path);
+    let repo = Repository::discover(&normalized).context("Not a git repository")?;
 
     let repo_root = repo
         .workdir()
@@ -34,6 +48,10 @@ pub fn changed_files(repo_path: &Path, base_ref: &str) -> Result<GitDiff> {
     let head_tree = head_ref
         .peel_to_tree()
         .context("Could not peel HEAD to a tree")?;
+
+    // Refresh index from disk to pick up changes made by the git CLI
+    let mut index = repo.index().context("Could not read index")?;
+    index.read(true).context("Could not refresh index from disk")?;
 
     let mut files = HashSet::new();
 
@@ -79,7 +97,8 @@ pub fn changed_files(repo_path: &Path, base_ref: &str) -> Result<GitDiff> {
 /// Compute the merge-base between HEAD and the given branch.
 /// Returns the commit SHA as a string. Used when `--merge-base` is passed.
 pub fn merge_base(repo_path: &Path, branch: &str) -> Result<String> {
-    let repo = Repository::discover(repo_path).context("Not a git repository")?;
+    let normalized = normalize_path(repo_path);
+    let repo = Repository::discover(&normalized).context("Not a git repository")?;
 
     debug!("Computing merge-base between HEAD and '{}'", branch);
 
