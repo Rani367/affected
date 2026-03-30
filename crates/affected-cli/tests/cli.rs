@@ -143,18 +143,17 @@ fn test_cli_list_no_changes() {
 #[test]
 fn test_cli_list_with_changes() {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
-    setup_cargo_workspace(&root);
+    setup_cargo_workspace(dir.path());
 
     // Make a change
     std::fs::write(
-        root.join("crates/core/src/lib.rs"),
+        dir.path().join("crates/core/src/lib.rs"),
         "pub fn hello() { /* v2 */ }\n",
     )
     .unwrap();
     std::process::Command::new("git")
         .args(["add", "-A"])
-        .current_dir(&root)
+        .current_dir(dir.path())
         .output()
         .unwrap();
     std::process::Command::new("git")
@@ -167,13 +166,13 @@ fn test_cli_list_with_changes() {
             "-m",
             "change core",
         ])
-        .current_dir(&root)
+        .current_dir(dir.path())
         .output()
         .unwrap();
 
     affected_cmd()
         .args(["list", "--base", "HEAD~1", "--root"])
-        .arg(&root)
+        .arg(dir.path())
         .assert()
         .success()
         .stdout(predicate::str::contains("core"))
@@ -283,18 +282,17 @@ fn test_cli_test_dry_run_no_changes() {
 #[test]
 fn test_cli_ci_matrix_output() {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
-    setup_cargo_workspace(&root);
+    setup_cargo_workspace(dir.path());
 
     // Make a change to core
     std::fs::write(
-        root.join("crates/core/src/lib.rs"),
+        dir.path().join("crates/core/src/lib.rs"),
         "pub fn hello() { /* ci-test */ }\n",
     )
     .unwrap();
     std::process::Command::new("git")
         .args(["add", "-A"])
-        .current_dir(&root)
+        .current_dir(dir.path())
         .output()
         .unwrap();
     std::process::Command::new("git")
@@ -307,13 +305,13 @@ fn test_cli_ci_matrix_output() {
             "-m",
             "change core",
         ])
-        .current_dir(&root)
+        .current_dir(dir.path())
         .output()
         .unwrap();
 
     let output = affected_cmd()
         .args(["ci", "--base", "HEAD~1", "--root"])
-        .arg(&root)
+        .arg(dir.path())
         .output()
         .unwrap();
 
@@ -359,18 +357,17 @@ fn test_cli_ci_no_changes() {
 #[test]
 fn test_cli_run_dry_run() {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
-    setup_cargo_workspace(&root);
+    setup_cargo_workspace(dir.path());
 
     // Make a change
     std::fs::write(
-        root.join("crates/core/src/lib.rs"),
+        dir.path().join("crates/core/src/lib.rs"),
         "pub fn hello() { /* run-test */ }\n",
     )
     .unwrap();
     std::process::Command::new("git")
         .args(["add", "-A"])
-        .current_dir(&root)
+        .current_dir(dir.path())
         .output()
         .unwrap();
     std::process::Command::new("git")
@@ -383,7 +380,7 @@ fn test_cli_run_dry_run() {
             "-m",
             "change core",
         ])
-        .current_dir(&root)
+        .current_dir(dir.path())
         .output()
         .unwrap();
 
@@ -396,7 +393,7 @@ fn test_cli_run_dry_run() {
             "--dry-run",
             "--root",
         ])
-        .arg(&root)
+        .arg(dir.path())
         .assert()
         .success()
         .stdout(predicate::str::contains("[dry-run]"))
