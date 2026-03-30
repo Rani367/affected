@@ -283,17 +283,18 @@ fn test_cli_test_dry_run_no_changes() {
 #[test]
 fn test_cli_ci_matrix_output() {
     let dir = tempfile::tempdir().unwrap();
-    setup_cargo_workspace(dir.path());
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    setup_cargo_workspace(&root);
 
     // Make a change to core
     std::fs::write(
-        dir.path().join("crates/core/src/lib.rs"),
+        root.join("crates/core/src/lib.rs"),
         "pub fn hello() { /* ci-test */ }\n",
     )
     .unwrap();
     std::process::Command::new("git")
         .args(["add", "-A"])
-        .current_dir(dir.path())
+        .current_dir(&root)
         .output()
         .unwrap();
     std::process::Command::new("git")
@@ -306,13 +307,13 @@ fn test_cli_ci_matrix_output() {
             "-m",
             "change core",
         ])
-        .current_dir(dir.path())
+        .current_dir(&root)
         .output()
         .unwrap();
 
     let output = affected_cmd()
         .args(["ci", "--base", "HEAD~1", "--root"])
-        .arg(dir.path())
+        .arg(&root)
         .output()
         .unwrap();
 
@@ -358,17 +359,18 @@ fn test_cli_ci_no_changes() {
 #[test]
 fn test_cli_run_dry_run() {
     let dir = tempfile::tempdir().unwrap();
-    setup_cargo_workspace(dir.path());
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    setup_cargo_workspace(&root);
 
     // Make a change
     std::fs::write(
-        dir.path().join("crates/core/src/lib.rs"),
+        root.join("crates/core/src/lib.rs"),
         "pub fn hello() { /* run-test */ }\n",
     )
     .unwrap();
     std::process::Command::new("git")
         .args(["add", "-A"])
-        .current_dir(dir.path())
+        .current_dir(&root)
         .output()
         .unwrap();
     std::process::Command::new("git")
@@ -381,7 +383,7 @@ fn test_cli_run_dry_run() {
             "-m",
             "change core",
         ])
-        .current_dir(dir.path())
+        .current_dir(&root)
         .output()
         .unwrap();
 
@@ -394,7 +396,7 @@ fn test_cli_run_dry_run() {
             "--dry-run",
             "--root",
         ])
-        .arg(dir.path())
+        .arg(&root)
         .assert()
         .success()
         .stdout(predicate::str::contains("[dry-run]"))

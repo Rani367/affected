@@ -9,6 +9,9 @@ description = "Detect affected packages. Run only what matters. Language-agnosti
 keywords = ["monorepo", "testing", "ci", "affected", "workspace"]
 categories = ["development-tools::testing", "command-line-utilities"]
 
+[features]
+vendored-openssl = ["affected-core/vendored-openssl"]
+
 [[bin]]
 name = "affected"
 path = "src/main.rs"

@@ -9,6 +9,9 @@ description = "Core library for language-agnostic affected test detection in mon
 keywords = ["monorepo", "testing", "ci", "affected", "workspace"]
 categories = ["development-tools::testing", "command-line-utilities"]
 
+[features]
+vendored-openssl = ["git2/vendored-openssl"]
+
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
