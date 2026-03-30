@@ -62,6 +62,15 @@ Every monorepo team hacks together bash scripts with `git diff | grep` to avoid 
 # Homebrew (macOS/Linux)
 brew install Rani367/tap/affected
 
+# uv
+uv tool install affected
+
+# pipx
+pipx install affected
+
+# pip
+pip install affected
+
 # Cargo
 cargo install affected-cli
 

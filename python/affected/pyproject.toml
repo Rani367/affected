@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "affected"
+version = "0.2.1"
+description = "Detect affected packages. Run only what matters. Language-agnostic monorepo tool."
+readme = "../../README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [{ name = "Rani367" }]
+keywords = ["monorepo", "testing", "ci", "affected", "workspace"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/Rani367/affected"
+Repository = "https://github.com/Rani367/affected"
+
+[project.scripts]
+affected = "affected._main:main"
