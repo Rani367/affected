@@ -72,19 +72,21 @@ function CellValue({ value, highlight }: { value: string; highlight: boolean }) 
   }
   if (value === "\u2717") {
     return (
-      <span style={{ color: "#ff0055", opacity: 0.7 }}>{value}</span>
+      <span style={{ color: "#ff0055", opacity: 0.55 }}>{value}</span>
     );
   }
   return (
-    <span className={highlight ? "text-white" : "text-primary-text"}>
+    <span className={highlight ? "font-semibold text-white" : "text-primary-text"}>
       {value}
     </span>
   );
 }
 
+const ACCENT = "255,0,85";
+
 export const BuildMomentum = () => {
   return (
-    <Features color="255,0,85" colorDark="170,0,51">
+    <Features color={ACCENT} colorDark="170,0,51">
       <Features.Main
         title={
           <>
@@ -98,34 +100,61 @@ export const BuildMomentum = () => {
       />
       <Container>
         <div className="mb-16 w-full overflow-x-auto md:mb-[14rem]">
-          <div className="min-w-[60rem] rounded-[2.4rem] border border-transparent-white bg-[rgba(255,255,255,0.03)]">
-            {/* Header */}
-            <div className="grid grid-cols-5 border-b border-transparent-white px-8 py-5 text-sm font-medium text-white">
-              <div className="text-primary-text">Feature</div>
-              <div style={{ color: "rgb(255,0,85)" }}>affected</div>
-              <div className="text-primary-text">Nx</div>
-              <div className="text-primary-text">Turborepo</div>
-              <div className="text-primary-text">Bazel</div>
+          <div className="relative min-w-[60rem] overflow-hidden rounded-[2.4rem] border border-transparent-white bg-[rgba(255,255,255,0.03)]">
+
+            {/* Header row */}
+            <div className="grid grid-cols-5 border-b border-transparent-white text-sm font-medium text-white">
+              <div className="px-8 py-5 text-primary-text">Feature</div>
+
+              {/* Affected column header — highlighted */}
+              <div className="relative px-8 py-5 font-semibold" style={{ color: `rgb(${ACCENT})` }}>
+                {/* Top accent bar */}
+                <span
+                  className="pointer-events-none absolute inset-x-0 top-0 h-[2px]"
+                  style={{ background: `linear-gradient(to right, transparent, rgba(${ACCENT},0.8), transparent)` }}
+                />
+                {/* Column bg */}
+                <span
+                  className="pointer-events-none absolute inset-0"
+                  style={{ background: `rgba(${ACCENT},0.06)` }}
+                />
+                <span className="relative">affected ✦</span>
+              </div>
+
+              <div className="px-8 py-5 text-primary-text">Nx</div>
+              <div className="px-8 py-5 text-primary-text">Turborepo</div>
+              <div className="px-8 py-5 text-primary-text">Bazel</div>
             </div>
-            {/* Rows */}
-            {comparisonData.map((row) => (
+
+            {/* Data rows */}
+            {comparisonData.map((row, idx) => (
               <div
                 key={row.feature}
-                className="grid grid-cols-5 border-b border-transparent-white px-8 py-4 text-sm last:border-b-0"
+                className="grid grid-cols-5 border-b border-transparent-white text-sm last:border-b-0"
               >
-                <div className="text-white">{row.feature}</div>
-                <div>
-                  <CellValue {...row.affected} />
+                <div className="px-8 py-4 text-white">{row.feature}</div>
+
+                {/* Affected column cell — highlighted */}
+                <div className="relative px-8 py-4">
+                  <span
+                    className="pointer-events-none absolute inset-0"
+                    style={{ background: `rgba(${ACCENT},0.04)` }}
+                  />
+                  {/* Bottom border continuation */}
+                  {idx < comparisonData.length - 1 && (
+                    <span
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-[1px]"
+                      style={{ background: `rgba(${ACCENT},0.1)` }}
+                    />
+                  )}
+                  <span className="relative">
+                    <CellValue {...row.affected} />
+                  </span>
                 </div>
-                <div>
-                  <CellValue {...row.nx} />
-                </div>
-                <div>
-                  <CellValue {...row.turborepo} />
-                </div>
-                <div>
-                  <CellValue {...row.bazel} />
-                </div>
+
+                <div className="px-8 py-4"><CellValue {...row.nx} /></div>
+                <div className="px-8 py-4"><CellValue {...row.turborepo} /></div>
+                <div className="px-8 py-4"><CellValue {...row.bazel} /></div>
               </div>
             ))}
           </div>

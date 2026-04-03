@@ -16,12 +16,14 @@ interface Line {
 }
 
 interface Demo {
+  label: string;
   command: string;
   output: string[];
 }
 
 const demos: Demo[] = [
   {
+    label: "--explain",
     command: "affected list --base main --explain",
     output: [
       "",
@@ -33,6 +35,7 @@ const demos: Demo[] = [
     ],
   },
   {
+    label: "test",
     command: "affected test --base main --jobs 4",
     output: [
       "",
@@ -46,6 +49,7 @@ const demos: Demo[] = [
     ],
   },
   {
+    label: "graph",
     command: "affected graph --base main",
     output: [
       "",
@@ -77,8 +81,6 @@ function colorizeOutput(line: string): React.ReactNode {
     [/\(no dependencies\)/g, "text-grey"],
   ];
 
-  // Split line into tokens and colorize
-  // Simple approach: process character by character with regex matching
   const spans: { start: number; end: number; className: string }[] = [];
 
   for (const [pattern, className] of patterns) {
@@ -89,7 +91,6 @@ function colorizeOutput(line: string): React.ReactNode {
     }
   }
 
-  // Sort spans by start position
   spans.sort((a, b) => a.start - b.start);
 
   let pos = 0;
@@ -145,7 +146,6 @@ export const HeroImage = () => {
   const [lines, setLines] = useState<Line[]>([]);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Terminal animation state
   const [demoIndex, setDemoIndex] = useState(0);
   const [typedChars, setTypedChars] = useState(0);
   const [visibleOutputLines, setVisibleOutputLines] = useState(0);
@@ -156,7 +156,6 @@ export const HeroImage = () => {
     setLines((prev) => prev.filter((line) => line.id !== id));
   };
 
-  // Glow lines effect
   useEffect(() => {
     if (!inView) return;
 
@@ -171,7 +170,6 @@ export const HeroImage = () => {
             id: Math.random().toString(36).substring(7),
           },
         ]);
-
         renderLine(randomNumberBetween(800, 2500));
       }, timeout);
     };
@@ -183,7 +181,6 @@ export const HeroImage = () => {
     };
   }, [inView, setLines]);
 
-  // Terminal typing animation
   useEffect(() => {
     if (!inView) return;
 
@@ -196,7 +193,6 @@ export const HeroImage = () => {
           setTypedChars((c) => c + 1);
         }, jitter);
       } else {
-        // Done typing, move to output phase
         animationTimeoutRef.current = setTimeout(() => {
           setPhase("output");
           setVisibleOutputLines(0);
@@ -208,7 +204,6 @@ export const HeroImage = () => {
           setVisibleOutputLines((v) => v + 1);
         }, 80);
       } else {
-        // Done showing output, wait then move to next demo
         animationTimeoutRef.current = setTimeout(() => {
           setPhase("waiting");
         }, 3500);
@@ -228,6 +223,14 @@ export const HeroImage = () => {
   const currentDemo = demos[demoIndex];
   const displayedCommand = currentDemo.command.slice(0, typedChars);
   const showCursor = phase === "typing";
+
+  const handleTabClick = (i: number) => {
+    if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+    setDemoIndex(i);
+    setTypedChars(0);
+    setVisibleOutputLines(0);
+    setPhase("typing");
+  };
 
   return (
     <div ref={ref} className="mt-[12.8rem] [perspective:2000px]">
@@ -264,7 +267,7 @@ export const HeroImage = () => {
         <svg
           className={classNames(
             "absolute left-0 top-0 h-full w-full",
-            "[&_path]:stroke-white [&_path]:[strokeOpacity:0.2] [&_path]:[stroke-dasharray:1] [&_path]:[stroke-dashoffset:1]",
+            "[&_path]:stroke-white [&_path]:[strokeOpacity:0.15] [&_path]:[stroke-dasharray:1] [&_path]:[stroke-dashoffset:1]",
             inView && "[&_path]:animate-sketch-lines"
           )}
           width="100%"
@@ -285,38 +288,69 @@ export const HeroImage = () => {
             inView ? "opacity-100" : "opacity-0"
           )}
         >
-          <div className="rounded-lg bg-[#0d0f14] border border-transparent-white overflow-hidden">
-            {/* Terminal header */}
-            <div className="flex items-center px-[1.6rem] py-[1.2rem] bg-[rgba(255,255,255,0.03)] border-b border-transparent-white">
+          <div className="overflow-hidden rounded-lg border border-transparent-white bg-[#0d0f14]">
+            {/* Terminal header with demo tabs */}
+            <div className="flex items-center border-b border-transparent-white bg-[rgba(255,255,255,0.03)] px-[1.6rem] py-[1.2rem]">
               <div className="flex gap-[0.8rem]">
-                <div className="w-[1.2rem] h-[1.2rem] rounded-full bg-[#ff5f57]" />
-                <div className="w-[1.2rem] h-[1.2rem] rounded-full bg-[#febc2e]" />
-                <div className="w-[1.2rem] h-[1.2rem] rounded-full bg-[#28c840]" />
+                <div className="h-[1.2rem] w-[1.2rem] rounded-full bg-[#ff5f57]" />
+                <div className="h-[1.2rem] w-[1.2rem] rounded-full bg-[#febc2e]" />
+                <div className="h-[1.2rem] w-[1.2rem] rounded-full bg-[#28c840]" />
               </div>
-              <span className="flex-1 text-center text-[1.3rem] text-grey">
-                affected — terminal
-              </span>
+
+              {/* Clickable demo tabs */}
+              <div className="flex flex-1 items-center justify-center gap-1">
+                {demos.map((demo, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleTabClick(i)}
+                    className={classNames(
+                      "rounded px-[10px] py-[3px] font-mono text-[1.2rem] transition-colors duration-150",
+                      i === demoIndex
+                        ? "bg-[rgba(0,240,255,0.12)] text-[#00f0ff]"
+                        : "text-grey hover:text-white"
+                    )}
+                  >
+                    {demo.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="w-[5.2rem]" />
             </div>
 
             {/* Terminal body */}
-            <div className="min-h-[36rem] p-[2rem] font-mono text-[1.3rem] leading-[2.2rem] text-white/80">
-              {/* Command line */}
+            <div className="min-h-[32rem] p-[2rem] font-mono text-[1.3rem] leading-[2.2rem] text-white/80">
               <div className="whitespace-pre">
                 <span className="text-[#00f0ff]">$ </span>
                 {colorizeCommand(displayedCommand)}
                 {showCursor && (
-                  <span className="inline-block w-[0.8rem] h-[1.5rem] bg-white/70 align-middle ml-[1px] animate-[cursor-blink_1s_step-end_infinite]" />
+                  <span className="ml-[1px] inline-block h-[1.5rem] w-[0.8rem] animate-[cursor-blink_1s_step-end_infinite] align-middle bg-white/70" />
                 )}
               </div>
 
-              {/* Output lines */}
               {phase !== "typing" &&
                 currentDemo.output.slice(0, visibleOutputLines).map((outputLine, i) => (
                   <div key={i} className="whitespace-pre">
                     {colorizeOutput(outputLine)}
                   </div>
                 ))}
+            </div>
+
+            {/* Demo progress indicator */}
+            <div className="flex items-center justify-center gap-[6px] pb-[1.4rem]">
+              {demos.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleTabClick(i)}
+                  className="rounded-full transition-all duration-500"
+                  style={{
+                    height: 4,
+                    width: i === demoIndex ? 20 : 6,
+                    background: i === demoIndex ? "#00f0ff" : "rgba(255,255,255,0.18)",
+                  }}
+                  aria-label={`Switch to ${demos[i].label} demo`}
+                />
+              ))}
             </div>
           </div>
         </div>
