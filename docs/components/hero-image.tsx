@@ -304,7 +304,7 @@ export const HeroImage = () => {
                     key={i}
                     onClick={() => handleTabClick(i)}
                     className={classNames(
-                      "rounded px-[10px] py-[3px] font-mono text-[1.2rem] transition-colors duration-150",
+                      "rounded px-[12px] py-[4px] font-mono text-[1.3rem] tracking-wide transition-colors duration-150",
                       i === demoIndex
                         ? "bg-[rgba(0,240,255,0.12)] text-[#00f0ff]"
                         : "text-grey hover:text-white"
@@ -319,18 +319,23 @@ export const HeroImage = () => {
             </div>
 
             {/* Terminal body */}
-            <div className="min-h-[32rem] p-[2rem] font-mono text-[1.3rem] leading-[2.2rem] text-white/80">
-              <div className="whitespace-pre">
-                <span className="text-[#00f0ff]">$ </span>
+            <div className="min-h-[32rem] p-[2.4rem] font-mono text-[1.5rem] leading-[2.4rem] text-white/85">
+              <div className="whitespace-pre flex items-center gap-[0.4rem]">
+                <span className="text-[#7c6af7]">~/projects/myapp</span>
+                <span className="text-white/30 mx-[0.3rem]">on</span>
+                <span className="text-[#f97583]"> main</span>
+                <span className="text-white/30 mx-[0.3rem]">›</span>
+                <span className="text-[#00f0ff]">$</span>
+                <span> </span>
                 {colorizeCommand(displayedCommand)}
                 {showCursor && (
-                  <span className="ml-[1px] inline-block h-[1.5rem] w-[0.8rem] animate-[cursor-blink_1s_step-end_infinite] align-middle bg-white/70" />
+                  <span className="inline-block h-[1.6rem] w-[0.7rem] animate-[cursor-blink_1s_step-end_infinite] align-middle bg-white/70" />
                 )}
               </div>
 
               {phase !== "typing" &&
                 currentDemo.output.slice(0, visibleOutputLines).map((outputLine, i) => (
-                  <div key={i} className="whitespace-pre">
+                  <div key={i} className="whitespace-pre text-white/75">
                     {colorizeOutput(outputLine)}
                   </div>
                 ))}
