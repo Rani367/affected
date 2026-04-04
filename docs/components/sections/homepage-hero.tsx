@@ -14,7 +14,7 @@ export const HomepageHero = () => (
       <span>v1.0.0 — 13 ecosystems supported</span>{" "}
       <Highlight>→</Highlight>
     </Button>
-    <HeroTitle className="translate-y-[-1rem] animate-fade-in opacity-0 [--animation-delay:200ms]">
+    <HeroTitle className="translate-y-[-1rem] animate-fade-in">
       Run only
       <br className="hidden md:block" /> what matters.
     </HeroTitle>

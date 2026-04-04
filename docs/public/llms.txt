@@ -1,0 +1,49 @@
+# affected
+
+> A standalone CLI that detects affected packages in your monorepo and runs commands only on changed packages. Zero config. ~5 MB binary. No runtime required.
+
+## What it does
+
+affected builds a dependency graph of your monorepo, diffs against your base branch using libgit2, traverses the graph in reverse to find all transitively affected packages, and runs any command (test, lint, build) only on those packages. Six steps, milliseconds.
+
+## Key features
+
+- Zero config: auto-detects your ecosystem from lock files
+- ~5 MB Rust binary with no runtime dependencies (no Node.js, no JVM)
+- 13 supported ecosystems
+- Transitive dependency graph analysis
+- Watch mode for local development
+- CI integration with JUnit output and dynamic matrix support
+- --explain flag to show why each package was affected
+
+## Supported ecosystems
+
+Cargo, npm, pnpm, Yarn, Bun, Go modules, Maven, Gradle, pip, Poetry, uv, Pipenv, Mix (Elixir)
+
+## Install
+
+Homebrew:
+  brew install affected
+
+Cargo:
+  cargo install affected-cli
+
+uv / pipx:
+  uvx affected
+
+GitHub Actions:
+  - uses: Rani367/affected-action@v1
+
+## Usage
+
+  affected test --base main
+  affected lint --base origin/main --watch
+  affected build --base HEAD~1 --output junit
+
+## Source
+
+https://github.com/Rani367/affected
+
+## License
+
+MIT — https://github.com/Rani367/affected/blob/main/LICENSE

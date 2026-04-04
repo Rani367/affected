@@ -6,9 +6,9 @@ const footerLinks = [
   {
     title: "Product",
     links: [
-      { title: "Features", href: "#" },
-      { title: "Ecosystems", href: "#" },
-      { title: "Install", href: "#" },
+      { title: "Features", href: "#features" },
+      { title: "Ecosystems", href: "#ecosystems" },
+      { title: "Install", href: "#install" },
       { title: "Changelog", href: "https://github.com/Rani367/affected/releases" },
       { title: "GitHub", href: "https://github.com/Rani367/affected" },
     ],
@@ -16,7 +16,7 @@ const footerLinks = [
   {
     title: "Resources",
     links: [
-      { title: "Documentation", href: "#" },
+      { title: "Documentation", href: "https://github.com/Rani367/affected#readme" },
       { title: "Issues", href: "https://github.com/Rani367/affected/issues" },
       { title: "Crates.io", href: "https://crates.io/crates/affected-cli" },
       { title: "MIT License", href: "https://github.com/Rani367/affected/blob/main/LICENSE" },
@@ -33,7 +33,7 @@ export const Footer = () => (
             <span className="mr-4 font-mono">affected</span> — Built with Rust
           </div>
           <div className="mt-auto flex space-x-4 text-grey">
-            <Link href="https://github.com/Rani367/affected">
+            <Link href="https://github.com/Rani367/affected" aria-label="GitHub repository">
               <GithubIcon />
             </Link>
           </div>
